@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pracovní stůl – telefon</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#023444">
+<style>
+:root{--bg:#0f1b21;--panel:#162830;--fg:#e8f0f2;--muted:#8fa6ad;--line:#27414b;--green:#89E103;--violet:#884DFF;--err:#ff8a80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 18px 40px}
+main{max-width:520px;margin:0 auto}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 22px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+ol{margin:0;padding-left:20px} li{margin:6px 0}
+button{width:100%;border:0;border-radius:10px;padding:13px;font:inherit;font-weight:600;background:var(--violet);color:#fff;margin-top:8px}
+button.druhe{background:transparent;border:1px solid var(--line);color:var(--fg)}
+button:disabled{opacity:.5}
+textarea{width:100%;height:110px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);padding:8px;font:12px ui-monospace,monospace;word-break:break-all}
+.hlaska{margin:10px 0 0;color:var(--muted)} .hlaska.ok{color:var(--green)} .hlaska.err{color:var(--err)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Pracovní stůl</h1>
+  <p class="sub">Notifikace na telefon. Stránka neobsahuje žádná data, jen přihlásí tento telefon k upozorněním.</p>
+
+  <div class="card" id="kIos" hidden>
+    <h2>Nejdřív přidej na plochu (iPhone)</h2>
+    <ol><li>Klepni na <b>Sdílet</b> (čtvereček se šipkou) v Safari.</li><li>Vyber <b>Přidat na plochu</b>.</li><li>Otevři <b>Pracovní stůl</b> z plochy a pokračuj tam. Notifikace fungují jen z ikony na ploše (iOS 16.4 a novější).</li></ol>
+  </div>
+
+  <div class="card" id="kZapnout">
+    <h2>1. Povol notifikace</h2>
+    <button id="zapnout" type="button">Zapnout notifikace</button>
+    <p class="hlaska" id="hlaska"></p>
+  </div>
+
+  <div class="card" id="kKod" hidden>
+    <h2>2. Předej kód stolu</h2>
+    <p style="margin:0 0 8px">Zkopíruj kód a vlož ho na Macu do stolu: <b>Nastavení → Notifikace → Telefon</b>. Kód můžeš poslat i přes sdílenou schránku (Universal Clipboard) nebo AirDrop.</p>
+    <textarea id="kod" readonly></textarea>
+    <button id="kopirovat" type="button" class="druhe">Zkopírovat kód</button>
+  </div>
+</main>
+<script src="config.js"></script>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const hlaska = (t, c) => { $('hlaska').textContent = t; $('hlaska').className = 'hlaska' + (c ? ' ' + c : ''); };
+  const bajty = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
+  const b64url = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const ios = /iPhone|iPad/.test(navigator.userAgent);
+  const appka = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if(ios && !appka){ $('kIos').hidden = false; $('zapnout').disabled = true; }
+  if(!window.STUL_KLIC){ hlaska('Stránka nemá klíč stolu (config.js). Publikuj ji znovu skriptem nastroje/telefon.sh.', 'err'); $('zapnout').disabled = true; }
+  else if(!('serviceWorker' in navigator) || !('PushManager' in window)){
+    hlaska(ios && !appka ? '' : 'Tento prohlížeč webové notifikace nepodporuje.', ios && !appka ? '' : 'err');
+    if(!(ios && !appka)) $('zapnout').disabled = true;
+  }
+  $('zapnout').onclick = async () => {
+    hlaska('Zapínám…');
+    try{
+      const reg = await navigator.serviceWorker.register('sw.js');
+      await navigator.serviceWorker.ready;
+      if(await Notification.requestPermission() !== 'granted') throw new Error('Notifikace nejsou povolené (Nastavení telefonu → Oznámení → Pracovní stůl).');
+      const klic = bajty(window.STUL_KLIC);
+      let sub = await reg.pushManager.getSubscription();
+      if(sub && sub.options && sub.options.applicationServerKey && btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))) !== btoa(String.fromCharCode(...klic))){
+        await sub.unsubscribe(); sub = null;   // stůl má jiný klíč než při minulém přihlášení
+      }
+      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: klic });
+      const j = sub.toJSON();
+      $('kod').value = 'stul1.' + b64url(JSON.stringify({ endpoint: j.endpoint, keys: j.keys }));
+      $('kKod').hidden = false;
+      hlaska('Notifikace jsou povolené. Teď předej kód stolu.', 'ok');
+    }catch(err){ hlaska(err.message, 'err'); }
+  };
+  $('kopirovat').onclick = async () => {
+    try{ await navigator.clipboard.writeText($('kod').value); $('kopirovat').textContent = 'Zkopírováno'; }
+    catch(e){ $('kod').select(); $('kopirovat').textContent = 'Označeno, zkopíruj ručně'; }
+  };
+})();
+</script>
+</body>
+</html>
