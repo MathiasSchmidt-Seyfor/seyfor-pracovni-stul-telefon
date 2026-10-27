@@ -3,7 +3,7 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
 
 self.addEventListener('push', e => {
-  let m = { nadpis: 'Pracovní stůl', text: 'Něco vyžaduje pozornost.' };
+  let m = { nadpis: 'Upozornění', text: 'Něco vyžaduje pozornost.' };
   try{ if(e.data) m = Object.assign(m, e.data.json()); }catch(err){ /* nečitelný obsah: obecná zpráva */ }
   e.waitUntil(self.registration.showNotification(m.nadpis, {
     body: m.text, icon: 'ikona-192.png', badge: 'ikona-192.png', tag: 'stul', renotify: true,
